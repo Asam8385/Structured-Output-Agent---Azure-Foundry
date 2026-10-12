@@ -7,7 +7,9 @@ authors = [
     { name = "ASAM", email = "subairasam8733260@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pydantic>=2.14.1",
+]
 
 [project.scripts]
 structured-output-agent = "structured_output_agent:main"
