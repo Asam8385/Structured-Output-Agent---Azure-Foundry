@@ -8,6 +8,10 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "azure-core>=1.41.0",
+    "azure-identity>=1.26.0",
+    "dotenv>=0.9.9",
+    "openai>=3.29.0",
     "pydantic>=2.14.1",
 ]
 
