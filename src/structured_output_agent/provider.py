@@ -27,6 +27,14 @@ class ProviderRefusal(Exception):
     """Provider refusal is a terminal outcome, not a JSON parse error."""
 
 
+
+class JSONProvider(Protocol):
+    def generate(
+        self, messages: Messages, schema: dict, schema_name: str, timeout: float
+    ) -> str: ...
+
+
+
 @dataclass(frozen=True)
 class FoundarySettings:
     endpoint: str
@@ -150,7 +158,7 @@ class FoundaryProvider:
         if self._credential is not None:
             self._credential.close()
 
-    def __enter__(self) -> "FoundryProvider":
+    def __enter__(self) -> "FoundaryProvider":
         return self
 
     def __exit__(self, *_args) -> None:
