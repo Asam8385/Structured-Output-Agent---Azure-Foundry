@@ -104,15 +104,58 @@ class FoundaryProvider:
              
          )
 
-    def generate(self, message: Messages , schema: dict , shcema_name: str , timeout: float) -> str:
-
+    def generate(self, messages: Messages, schema: dict, schema_name: str, timeout: float) -> str:
         if timeout <= 0:
             raise ProviderError("deadline_exceeded")
-
         try:
             completion = self._client.with_options(
-                
+                timeout=min(timeout, self.settings.request_timeout), max_retries=0
+            ).chat.completions.create(
+                model=self.settings.deployment,
+                messages=messages,
+                max_completion_tokens=self.settings.max_completion_tokens,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {"name": schema_name, "strict": True, "schema": schema},
+                },
+                # No tools, tool_choice, or provider-native function execution.
             )
+        except APITimeoutError:
+            raise ProviderError("request_timeout") from None
+        except APIConnectionError:
+            raise ProviderError("connection_failed") from None
+        except APIStatusError as exc:
+            raise ProviderError(f"http_{exc.status_code}") from None
+        except ClientAuthenticationError:
+            raise ProviderError("credential_failed") from None
+        except OpenAIError:
+            raise ProviderError("sdk_error") from None
+        if not completion.choices:
+            raise ProviderError("empty_response")
+        choice = completion.choices[0]
+        message = choice.message
+        if message.refusal:
+            raise ProviderRefusal()
+        if choice.finish_reason != "stop":
+            raise ProviderError("incomplete_response")
+        if message.tool_calls:
+            raise ProviderError("unexpected_native_tool_call")
+        if not isinstance(message.content, str):
+            raise ProviderError("missing_text_response")
+        return message.content
+
+    def close(self) -> None:
+        if self._owns_client:
+            self._client.close()
+        if self._credential is not None:
+            self._credential.close()
+
+    def __enter__(self) -> "FoundryProvider":
+        return self
+
+    def __exit__(self, *_args) -> None:
+        self.close()
+
 
 
         
