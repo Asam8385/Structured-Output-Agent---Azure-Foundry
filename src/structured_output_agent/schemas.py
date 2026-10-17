@@ -11,7 +11,7 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(strict=True , extra="forbid")
 
 
-class triageRequest(StrictModel):
+class TriageRequest(StrictModel):
     message : str 
 
     @field_validator("message")
