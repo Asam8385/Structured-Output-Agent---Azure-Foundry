@@ -148,19 +148,41 @@ def validation_details(exc: ValidationError) -> list[ValidationIssue]:
     ]
 
 
-def dispatch_function(decision: ActionDecision , registry: Mapping[str , FunctionSpec]) -> BaseModel:
-
+def dispatch_function(decision: ActionDecision, registry: Mapping[str, FunctionSpec]) -> BaseModel:
+    """Your own dispatcher: no SDK tools, reflection, eval, or model-supplied URLs."""
     name = decision.function_name
-
     if name is None or name not in registry or decision.arguments is None:
         raise FunctionBoundaryError("function_not_allowed")
-
     spec = registry[name]
-
     try:
         arguments = spec.arguments_model.model_validate(
             decision.arguments.model_dump(exclude_none=True)
         )
+    except ValidationError:
+        raise FunctionBoundaryError("function_arguments_invalid") from None
+    try:
+        raw_result = spec.function(**arguments.model_dump())
+    except Exception:
+        # Function implementations are an external boundary; never log raw errors.
+        raise FunctionBoundaryError("function_execution_failed") from None
+    try:
+        result = spec.result_model.model_validate(raw_result)
+    except ValidationError:
+        raise FunctionBoundaryError("function_result_invalid") from None
+    if isinstance(result, ServiceStatusResult) and result.service != arguments.service:
+        raise FunctionBoundaryError("function_service_mismatch")
+    if isinstance(result, RoutingPolicyResult) and result.category != arguments.category:
+        raise FunctionBoundaryError("function_category_mismatch")
+    return result
+
+
+
+
+
+    
+
+
+
 
 
 
