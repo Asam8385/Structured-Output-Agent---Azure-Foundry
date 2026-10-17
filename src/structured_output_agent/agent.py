@@ -179,6 +179,55 @@ def dispatch_function(decision: ActionDecision, registry: Mapping[str, FunctionS
 
 
 
+def check_ticket(ticket: Ticket, observations: list[FunctionObservation]) -> None:
+    known = {observation.reference: observation for observation in observations}
+    cited = {(item.source, item.reference) for item in ticket.evidence}
+    if ("user_message", "user:1") not in cited:
+        raise RuleError("Ticket must cite user:1")
+    for source, reference in cited:
+        if source == "user_message" and reference != "user:1":
+            raise RuleError("Unknown user-message evidence reference")
+        if source == "function_result" and reference not in known:
+            raise RuleError("Unknown function-result evidence reference")
+    policies = [
+        item
+        for item in observations
+        if isinstance(item.result, RoutingPolicyResult) and item.result.category == ticket.category
+    ]
+    if not policies:
+        raise RuleError("Call get_routing_policy for the ticket category before finishing")
+    policy = policies[-1]
+    if ticket.queue != policy.result.queue or ("function_result", policy.reference) not in cited:
+        raise RuleError("Queue must match and cite the validated routing policy")
+    if ticket.service is None:
+        if ticket.confirmed_incident_id is not None or not ticket.needs_clarification:
+            raise RuleError("Unknown service requires clarification and no confirmed incident")
+        if ticket.priority == "high":
+            raise RuleError("High priority requires a confirmed service outage")
+        return
+    statuses = [
+        item
+        for item in observations
+        if isinstance(item.result, ServiceStatusResult) and item.result.service == ticket.service
+    ]
+    if not statuses:
+        raise RuleError("Known service requires a validated get_service_status result")
+    status = statuses[-1]
+    if ("function_result", status.reference) not in cited:
+        raise RuleError("Ticket must cite its validated service status")
+    if ticket.confirmed_incident_id != status.result.incident_id:
+        raise RuleError("Incident ID must match the validated service-status result")
+    if status.result.status == "outage" and ticket.priority != "high":
+        raise RuleError("Confirmed outage requires high priority under the demo policy")
+    if status.result.status == "operational" and ticket.priority == "high":
+        raise RuleError("High priority requires a confirmed outage under the demo policy")
+
+
+
+    
+
+
+
     
 
 
