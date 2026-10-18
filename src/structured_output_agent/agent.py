@@ -350,6 +350,85 @@ def run_agent(
             return parsed
         raise RuntimeError("Unreachable: validation attempt count is positive")
 
+
+    def check_ready(decision: ActionDecision) -> None:
+        if decision.action == "finish" and not any(
+            isinstance(item.result, RoutingPolicyResult) for item in state.observations
+        ):
+            raise RuleError("Call get_routing_policy before choosing finish")
+
+    try:
+        while True:
+            decision = generate_validated(ActionDecision , "action_decision" , check_ready)
+
+    try:
+        while True:
+            decision = generate_validated(ActionDecision, "action_decision", check_ready)
+            if decision.action == "finish":
+                messages.append({"role": "user", "content": "Now return the final Ticket JSON."})
+                ticket = generate_validated(
+                    Ticket, "support_ticket", lambda item: check_ticket(item, state.observations)
+                )
+                return outcome("succeeded", ticket=ticket)
+            key = decision.model_dump_json()
+            if key in state.cache:
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "already_executed": state.cache[key].model_dump(mode="json"),
+                                "instruction": (
+                                    "Reuse this result; choose another function or finish."
+                                ),
+                            }
+                        ),
+                    }
+                )
+                continue
+            if state.function_calls >= limits.max_function_calls:
+                raise ReviewRequired("function_call_budget_exhausted")
+            state.function_calls += 1
+            result = dispatch_function(decision, registry)
+            observation = FunctionObservation(
+                reference=f"fn:{len(state.observations) + 1}",
+                function_name=decision.function_name,
+                result=result,
+            )
+            state.observations.append(observation)
+            state.cache[key] = observation
+            logger.info(
+                "function_validated run_id=%s function=%s reference=%s",
+                state.run_id,
+                decision.function_name,
+                observation.reference,
+            )
+            messages.append(
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {"validated_function_result": observation.model_dump(mode="json")}
+                    ),
+                }
+            )
+    except ReviewRequired as exc:
+        return outcome("needs_review", error=str(exc))
+    except ProviderRefusal:
+        return outcome("refused", error="provider_refused")
+    except FunctionBoundaryError as exc:
+        code = str(exc)
+        if code != "function_execution_failed":
+            state.validation_failures += 1
+        logger.warning("function_failed run_id=%s code=%s", state.run_id, code)
+        return outcome("failed", error=code)
+    except ProviderError as exc:
+        logger.warning("provider_failed run_id=%s code=%s", state.run_id, exc.code)
+        return outcome("failed", error=exc.code) 
+
+
+
+        
+
     
             
 
