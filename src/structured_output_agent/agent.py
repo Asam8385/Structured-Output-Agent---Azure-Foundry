@@ -298,6 +298,63 @@ def run_agent(
             raise ReviewRequired("model_call_budget_exhausted")
         return remaining
 
+    def generate_validated(
+        model: type[T], schema_name: str, extra_check: Callable[[T], None] | None = None
+    ) -> T:
+        for attempt in range(1, limits.validation_attempts + 1):
+            remaining = ensure_budget()
+            state.model_calls += 1
+            raw = provider.generate(messages, model.model_json_schema(), schema_name, remaining)
+            if time.monotonic() >= state.deadline:
+                raise ReviewRequired("run_deadline_exceeded")
+            if not isinstance(raw, str):
+                raise ProviderError("invalid_provider_return_type")
+            try:
+                parsed = model.model_validate_json(raw)
+                if extra_check is not None:
+                    extra_check(parsed)
+            except (ValidationError, RuleError) as exc:
+                issues = (
+                    validation_details(exc)
+                    if isinstance(exc, ValidationError)
+                    else [ValidationIssue(field="$", code="business_rule", rule=str(exc))]
+                )
+                state.validation_failures += 1
+                details = [issue.model_dump(exclude_none=True) for issue in issues]
+                logger.warning(
+                    "validation_failed run_id=%s phase=%s attempt=%d details=%s",
+                    state.run_id,
+                    schema_name,
+                    attempt,
+                    json.dumps(details),
+                )
+                if attempt == limits.validation_attempts:
+                    raise ReviewRequired(f"{schema_name}_validation_exhausted") from None  # from None use to hide read error from our custom error
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "phase": schema_name,
+                                "validation_errors": details,
+                                "instruction": (
+                                    "Regenerate using the original sources and supplied schema. "
+                                    "Do not invent facts to satisfy validation."
+                                ),
+                            }
+                        ),
+                    }
+                )
+                continue
+            messages.append({"role": "assistant", "content": raw})
+            return parsed
+        raise RuntimeError("Unreachable: validation attempt count is positive")
+
+    
+            
+
+    
+
 
 
 
